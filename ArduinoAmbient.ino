@@ -1,6 +1,8 @@
 // midi shield
 // button test pullup resistor
 
+#define PAIRSSIZE 5
+
 const int leftPot = A0;
 
 const int rightButton = 2;
@@ -21,7 +23,7 @@ struct intervalPair
   byte second;
 };
 
-intervalPair pairs[10];
+intervalPair pairs[PAIRSSIZE];
 
 // stores absolute note values
 // for MIDI purposes
@@ -37,7 +39,6 @@ void setup()
   prepareLearn();
 
   Serial.begin(31250); // MIDI baudrate is unusual
-  digitalWrite(led, HIGH);
   wait();
 }
 
@@ -56,15 +57,15 @@ void loop()
 void learn()
 {
   int i;
-  for (i = 0; i < 10; )
+  for (i = 0; i < PAIRSSIZE; )
   {
-    buildHarmony();
+    buildLearnHarmony();
 
     result = evalHarmony();
     if (result == 0)
     {
-      saveToPairs(i);      
-      // this way, we will have ten approved harmonies
+      saveToPairs(i);
+      // this way, we will have the right amount of harmonies
       // in the pairs array
       i++;
     }
@@ -73,26 +74,32 @@ void learn()
       break;
     }
   }
-
+  killMIDI();
   toLearn = false;
 }
 
 
-void buildHarmony()
+void buildLearnHarmony()
 {
   //   Pick three notes at least an octave (12 half steps) away from each other
   int i;
-  
+
   lastNotes[0] = random(lowestNote, lowestNote + 12);
   lastNotes[1] = random(lastNotes[0] + 12, lastNotes[0] + 24);
   lastNotes[2] = random(lastNotes[1] + 12, lastNotes[1] + 24);
 
+  playHarmonyinLastNotes();
+
+  return;
+}
+
+void playHarmonyinLastNotes()
+{
+  int i;
   for (i = 0; i < 3; i++)
   {
     send_note(lastNotes[i], 80); // ..and have the synth output them
   }
-
-  return;
 }
 
 byte evalHarmony()
@@ -118,7 +125,7 @@ byte evalHarmony()
     }
   }
 
-  killMIDI(); // make sure the previous chord is gone
+  stopLastNotes(); // make sure the previous chord is gone
   delay(150); // synthesizer patch should have some kind of release value for smooth transition
 
   return r;
@@ -129,14 +136,34 @@ byte evalHarmony()
 // approach later on
 void saveToPairs(int i)
 {
-    pairs[i].first = lastNotes[1] - lastNotes[0];
-    pairs[i].first = lastNotes[2] - lastNotes[1];
+  pairs[i].first = lastNotes[1] - lastNotes[0];
+  pairs[i].second = lastNotes[2] - lastNotes[1];
 }
 
 void execute()
 {
-  killMIDI();
+  int i;
   wait();
+  for (i = 0; i < PAIRSSIZE; i++)
+  {
+    buildHarmony(i, 36 + random(0, 12));
+    playHarmonyinLastNotes();
+    delay(4850);
+    stopLastNotes();
+    delay(150);
+  }
+  wait();
+}
+
+void buildHarmony(int i, int lowest)
+{
+  int c;
+
+  lastNotes[0] = lowest;
+  lastNotes[1] = lastNotes[0] + pairs[i].first;
+  lastNotes[2] = lastNotes[1] + pairs[i].second;
+
+  playHarmonyinLastNotes();
 }
 
 
@@ -157,7 +184,7 @@ void initLastNotes()
 void initPairs()
 {
   int i;
-  for (i = 0; i < 10; i++)
+  for (i = 0; i < PAIRSSIZE; i++)
   {
     pairs[i].first = pairs[i].second = 0;
   }
@@ -172,10 +199,22 @@ void killMIDI()
   Serial.write(0x00);
 }
 
-void endChord()
+void stopLastNotes()
 {
-   // TODO: implement key off for all lastNotes
-   // for smoother transitions
+  int i;
+  for (i = 0; i < 3; i++)
+  {
+    Serial.write(0x80); // Dec 128, note off for channel 1
+    Serial.write(lastNotes[i]);
+    Serial.write(0);
+  }
+}
+
+void send_note(unsigned char note, unsigned char velocity)
+{
+  Serial.write(0x90); // Dec 144, note on for channel 1
+  Serial.write(note);
+  Serial.write(velocity);
 }
 
 void prepareLearn()
@@ -199,13 +238,6 @@ byte checkRange(byte note)
   }
 }
 
-void send_note(unsigned char note, unsigned char velocity)
-{
-  Serial.write(0x90); // Dec 144, note on for channel 1
-  Serial.write(note);
-  Serial.write(velocity);
-}
-
 void wait()
 {
   // behavior where the LED blinks quickly
@@ -213,7 +245,7 @@ void wait()
   while (digitalRead(leftButton) == HIGH)
   {
     digitalWrite(led, HIGH);
-    delay(150);
+    delay(300);
     digitalWrite(led, LOW);
     delay(150);
   }
